@@ -1,0 +1,130 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
+}
+
+model Tenant {
+  id          String   @id @default(uuid())
+  name        String
+  rbacVersion Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users       User[]
+  groups      Group[]
+  roles       Role[]
+  permissions Permission[]
+}
+
+model User {
+  id                 String   @id @default(uuid())
+  tenantId           String
+  username           String
+  email              String?
+  passwordHash       String
+  isActive           Boolean  @default(true)
+  forcePasswordChange Boolean @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  groups UserGroup[]
+
+  @@unique([tenantId, username])
+  @@unique([tenantId, email])
+}
+
+model Group {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  description String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  users  UserGroup[]
+  roles  GroupRole[]
+
+  @@unique([tenantId, name])
+}
+
+model Role {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  groups GroupRole[]
+  perms  RolePermission[]
+
+  @@unique([tenantId, name])
+}
+
+model Permission {
+  id        String   @id @default(uuid())
+  tenantId  String
+  key       String   // e.g. "users.read", "rbac.manage", "*"
+  description String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  roles  RolePermission[]
+
+  @@unique([tenantId, key])
+}
+
+model UserGroup {
+  userId   String
+  groupId  String
+  assignedAt DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id])
+  group Group @relation(fields: [groupId], references: [id])
+
+  @@id([userId, groupId])
+}
+
+model GroupRole {
+  groupId String
+  roleId  String
+
+  group Group @relation(fields: [groupId], references: [id])
+  role  Role  @relation(fields: [roleId], references: [id])
+
+  @@id([groupId, roleId])
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id])
+  permission Permission @relation(fields: [permissionId], references: [id])
+
+  @@id([roleId, permissionId])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  tenantId  String
+  actorUserId String?
+  action    String   // "USER_CREATE", "ROLE_UPDATE", etc.
+  resource  String?  // "User", "Role", "Claim", etc.
+  resourceId String?
+  ip        String?
+  userAgent String?
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+}
