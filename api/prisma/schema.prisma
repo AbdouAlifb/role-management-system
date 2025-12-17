@@ -4,9 +4,7 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_DATABASE_URL")
+  provider = "postgresql"
 }
 
 model Tenant {
@@ -16,24 +14,26 @@ model Tenant {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  users       User[]
-  groups      Group[]
-  roles       Role[]
-  permissions Permission[]
+  users         User[]
+  groups        Group[]
+  roles         Role[]
+  permissions   Permission[]
+  menuGroups    MenuGroup[]
+  menuFunctions MenuFunction[]
 }
 
 model User {
-  id                 String   @id @default(uuid())
-  tenantId           String
-  username           String
-  email              String?
-  passwordHash       String
-  isActive           Boolean  @default(true)
-  forcePasswordChange Boolean @default(false)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id                  String   @id @default(uuid())
+  tenantId            String
+  username            String
+  email               String?
+  passwordHash        String
+  isActive            Boolean  @default(true)
+  forcePasswordChange Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id])
+  tenant Tenant      @relation(fields: [tenantId], references: [id])
   groups UserGroup[]
 
   @@unique([tenantId, username])
@@ -41,14 +41,14 @@ model User {
 }
 
 model Group {
-  id        String   @id @default(uuid())
-  tenantId  String
-  name      String
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
   description String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id])
+  tenant Tenant      @relation(fields: [tenantId], references: [id])
   users  UserGroup[]
   roles  GroupRole[]
 
@@ -62,30 +62,32 @@ model Role {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id])
-  groups GroupRole[]
-  perms  RolePermission[]
+  tenant            Tenant             @relation(fields: [tenantId], references: [id])
+  groups            GroupRole[]
+  perms             RolePermission[]
+  roleMenuGroups    RoleMenuGroup[]
+  roleMenuFunctions RoleMenuFunction[]
 
   @@unique([tenantId, name])
 }
 
 model Permission {
-  id        String   @id @default(uuid())
-  tenantId  String
-  key       String   // e.g. "users.read", "rbac.manage", "*"
+  id          String   @id @default(uuid())
+  tenantId    String
+  key         String // e.g. "users.read", "rbac.manage", "*"
   description String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id])
+  tenant Tenant           @relation(fields: [tenantId], references: [id])
   roles  RolePermission[]
 
   @@unique([tenantId, key])
 }
 
 model UserGroup {
-  userId   String
-  groupId  String
+  userId     String
+  groupId    String
   assignedAt DateTime @default(now())
 
   user  User  @relation(fields: [userId], references: [id])
@@ -115,16 +117,85 @@ model RolePermission {
 }
 
 model AuditLog {
-  id        String   @id @default(uuid())
-  tenantId  String
+  id          String   @id @default(uuid())
+  tenantId    String
   actorUserId String?
-  action    String   // "USER_CREATE", "ROLE_UPDATE", etc.
-  resource  String?  // "User", "Role", "Claim", etc.
-  resourceId String?
-  ip        String?
-  userAgent String?
-  meta      Json?
-  createdAt DateTime @default(now())
+  action      String // "USER_CREATE", "ROLE_UPDATE", etc.
+  resource    String? // "User", "Role", "Claim", etc.
+  resourceId  String?
+  ip          String?
+  userAgent   String?
+  meta        Json?
+  createdAt   DateTime @default(now())
 
   @@index([tenantId, createdAt])
+}
+
+model MenuGroup {
+  id        String   @id @default(uuid())
+  tenantId  String
+  code      String
+  name      String
+  sequence  Int? // sidebar ordering (legacy adm_groupe.sequence)
+  icon      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant    Tenant              @relation(fields: [tenantId], references: [id])
+  functions MenuGroupFunction[]
+  roles     RoleMenuGroup[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, sequence])
+}
+
+model MenuFunction {
+  id                    String   @id @default(uuid())
+  tenantId              String
+  code                  String
+  name                  String
+  type                  String // keep legacy "type" (ex: "M", "E")
+  path                  String? // frontend route
+  requiredPermissionKey String? // optional: gate by your Permission.key
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  tenant Tenant              @relation(fields: [tenantId], references: [id])
+  groups MenuGroupFunction[]
+  roles  RoleMenuFunction[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, type])
+}
+
+model MenuGroupFunction {
+  menuGroupId    String
+  menuFunctionId String
+  sequence       Int?
+
+  menuGroup    MenuGroup    @relation(fields: [menuGroupId], references: [id], onDelete: Cascade)
+  menuFunction MenuFunction @relation(fields: [menuFunctionId], references: [id], onDelete: Cascade)
+
+  @@id([menuGroupId, menuFunctionId])
+  @@index([menuGroupId, sequence])
+}
+
+model RoleMenuGroup {
+  roleId      String
+  menuGroupId String
+
+  role      Role      @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  menuGroup MenuGroup @relation(fields: [menuGroupId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, menuGroupId])
+}
+
+model RoleMenuFunction {
+  roleId         String
+  menuFunctionId String
+
+  role         Role         @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  menuFunction MenuFunction @relation(fields: [menuFunctionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, menuFunctionId])
 }

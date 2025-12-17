@@ -7,6 +7,8 @@ import { RbacModule } from "./rbac/rbac.module";
 import { AuthModule } from "./auth/auth.module";
 import { AdminModule } from "./admin/admin.module";
 import { AuditModule } from "./audit/audit.module";
+import { MenuModule } from "./menu/menu.module";
+
 
 @Module({
   imports: [
@@ -20,6 +22,7 @@ import { AuditModule } from "./audit/audit.module";
     AuditModule,
     AuthModule,
     AdminModule,
+     MenuModule,
   ],
 })
 export class AppModule {}

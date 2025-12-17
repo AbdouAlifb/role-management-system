@@ -1,5 +1,6 @@
 import React, { createContext, useEffect, useMemo, useState } from "react";
 import { http } from "../api/http";
+import { clearMenuCache } from "../menu/menuCache";
 
 export type AuthUser = { id: string; username: string; tenantId: string };
 
@@ -79,14 +80,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const logout = async () => {
-    try {
-      await http.post("/auth/logout");
-    } finally {
-      localStorage.removeItem("csrfToken");
-      setState({ user: null, permissions: [], csrfToken: null, loading: false });
-    }
-  };
+
+const logout = async () => {
+  const tenantId = state.user?.tenantId; // capture before state reset
+  try {
+    await http.post("/auth/logout");
+  } finally {
+    localStorage.removeItem("csrfToken");
+    if (tenantId) clearMenuCache(tenantId);
+    setState({ user: null, permissions: [], csrfToken: null, loading: false });
+  }
+};
+
 
   const value = useMemo(
     () => ({ ...state, login, logout, refreshMe }),

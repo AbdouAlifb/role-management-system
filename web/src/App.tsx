@@ -7,9 +7,9 @@ import DashboardHome from "./pages/DashboardHome";
 import "./styles/app.css";
 import RoleManagementPage from "./pages/RoleManagementPage";
 import UserManagementPage from "./pages/UserManagementPage";// if you already have it
-
+import MenuManagementPage from "./pages/MenuManagementPage";
 // ...
-
+import ComingSoonPage from "./pages/ComingSoonPage";
 
 export default function App() {
   return (
@@ -30,10 +30,10 @@ export default function App() {
             <Route index element={<DashboardHome />} />
 <Route path="users" element={<UserManagementPage />} />
             <Route path="roles" element={<RoleManagementPage />} />
-
+<Route path="/dashboard/menu" element={<MenuManagementPage />} />
           </Route>
 
-          <Route path="*" element={<div style={{ padding: 24 }}>Not found</div>} />
+            <Route path="*" element={<ComingSoonPage />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>
