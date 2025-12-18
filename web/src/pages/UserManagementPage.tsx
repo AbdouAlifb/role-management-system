@@ -94,8 +94,9 @@ export default function UserManagementPage() {
       const groupNames = (u.groups?.length ? u.groups : access?.groups || []).map((g) => g.name).join(" ");
       const roleNames = (access?.roles || []).map((r) => r.name).join(" ");
       const menuNames = (access?.menu || []).flatMap((g) => g.items.map((it) => it.name)).join(" ");
+const permKeys = (access?.permissions || []).join(" ");
+const hay = `${u.username} ${u.email || ""} ${groupNames} ${roleNames} ${permKeys} ${menuNames}`;
 
-      const hay = `${u.username} ${u.email || ""} ${groupNames} ${roleNames} ${menuNames}`;
       return norm(hay).includes(nq);
     });
   }, [users, q, accessByUserId]);
@@ -402,6 +403,7 @@ export default function UserManagementPage() {
                     <th style={{ width: 240 }}>User</th>
                     <th style={{ width: 240 }}>Groups</th>
                     <th style={{ width: 180 }}>Roles</th>
+                    <th style={{ width: 180 }}>Permission</th>
                     <th style={{ width: 200 }}>Menu</th>
                     <th style={{ width: 140 }}>Status</th>
                     <th style={{ width: 240 }}>Actions</th>
@@ -417,6 +419,10 @@ export default function UserManagementPage() {
                   ) : (
                     filteredUsers.map((u) => {
                       const a = accessByUserId[u.id];
+                      const isAccessPending = !!accessLoading[u.id] && !a;
+
+                      const roleLabels = a?.roles?.map(r => r.name) ?? [];
+                      const permLabels = a?.permissions ?? [];
                       const stats = getAccessStats(u.id);
 
                       const displayGroups = (u.groups?.length ? u.groups : a?.groups || []).map((g) => g.name);
@@ -450,7 +456,13 @@ export default function UserManagementPage() {
     return renderPills(displayGroups, 2);
   })()}
 </td>
+<td>
+  {isAccessPending ? <span className="muted">Loading…</span> : renderPills(roleLabels, 2)}
+</td>
 
+<td>
+  {isAccessPending ? <span className="muted">Loading…</span> : renderPills(permLabels, 3)}
+</td>
 
                             <td>
                               {!a ? (
@@ -466,21 +478,22 @@ export default function UserManagementPage() {
                               )}
                             </td>
 
-                            <td>
-                              {!a ? (
-                                <span className="muted">—</span>
-                              ) : (
-                                <div>
-                                  <div style={{ fontWeight: 700, fontSize: 13 }}>
-                                    {stats.pages} pages <span className="muted">/ {stats.sections} sections</span>
-                                  </div>
-                                  <div className="muted" style={{ fontSize: 12 }}>
-                                    {(a.menu || []).slice(0, 2).map((g) => g.name).join(", ")}
-                                    {(a.menu || []).length > 2 ? "…" : ""}
-                                  </div>
-                                </div>
-                              )}
-                            </td>
+
+
+
+
+
+<td>
+  {isAccessPending ? (
+    <span className="muted">Loading…</span>
+  ) : (
+    <span>
+      <strong>{stats.pages}</strong> pages / <strong>{stats.sections}</strong> sections
+    </span>
+  )}
+</td>
+
+                            
 
                             <td>
                               <span className={`pill ${status.kind}`}>{status.label}</span>

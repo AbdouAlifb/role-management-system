@@ -32,15 +32,24 @@ export class MenuService {
     return perms.includes(key);
   }
 
-  async ensureSessionPerms(req: any) {
-    if (!req.session?.permissions) {
-      req.session.permissions = await this.rbac.computeUserPermissions(
-        req.session.userId,
-        req.session.tenantId,
-      );
-    }
-    return req.session.permissions as string[];
+async ensureSessionPerms(req: any) {
+  const tenantId = req.session?.tenantId;
+  const userId = req.session?.userId;
+  if (!tenantId || !userId) return [];
+
+  const t = await this.prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { rbacVersion: true },
+  });
+  const v = t?.rbacVersion ?? 0;
+
+  if (!req.session.permissions || req.session.permsVersion !== v) {
+    req.session.permissions = await this.rbac.computeUserPermissions(userId, tenantId);
+    req.session.permsVersion = v;
   }
+  return req.session.permissions;
+}
+
 
   async getMenuForUser(tenantId: string, userId: string, sessionPerms: string[]) {
     // Super admin shortcut: show all menu groups/functions for tenant
@@ -144,4 +153,19 @@ export class MenuService {
         .filter((it) => this.hasPerm(sessionPerms, it.requiredPermissionKey)),
     }));
   }
+  async listGroupFunctions(tenantId: string) {
+  return this.prisma.menuGroupFunction.findMany({
+    where: { menuGroup: { tenantId } },
+    include: { menuFunction: true },
+    orderBy: [{ menuGroupId: "asc" }, { sequence: "asc" }],
+  });
+}
+
+async listRoleGroups(tenantId: string) {
+  return this.prisma.roleMenuGroup.findMany({
+    where: { role: { tenantId } },
+    orderBy: [{ roleId: "asc" }, { menuGroupId: "asc" }],
+  });
+}
+
 }

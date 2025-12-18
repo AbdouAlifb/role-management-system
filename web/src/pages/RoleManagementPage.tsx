@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 
 type Role = { id: string; name: string; tenantId: string };
-type Permission = { id: string; key: string; tenantId: string };
+type Permission = { id: string; key: string; tenantId: string; description?: string | null };
 type Group = { id: string; name: string; tenantId: string };
 
 type Notice = { type: "success" | "error" | "info"; message: string };
@@ -39,6 +39,14 @@ function roleBadge(role: Role): "System" | "Custom" {
   return "Custom";
 }
 
+function permCategory(key: string) {
+  const k = (key || "").trim();
+  if (!k) return "other";
+  if (k === "*") return "system";
+  const idx = k.indexOf(".");
+  return idx > 0 ? k.slice(0, idx) : "other";
+}
+
 export default function RoleManagementPage() {
   const [view, setView] = useState<"roles" | "groups">("roles");
 
@@ -68,14 +76,23 @@ export default function RoleManagementPage() {
   const groupInputRef = useRef<HTMLInputElement | null>(null);
 
   // Row selections
-  const [selectedPermByRoleId, setSelectedPermByRoleId] = useState<Record<string, string>>({});
   const [selectedGroupByRoleId, setSelectedGroupByRoleId] = useState<Record<string, string>>({});
   const [selectedRoleByGroupId, setSelectedRoleByGroupId] = useState<Record<string, string>>({});
 
-  const [grantBusyRoleId, setGrantBusyRoleId] = useState<string | null>(null);
   const [attachBusyKey, setAttachBusyKey] = useState<string | null>(null);
 
-  const showNotice = (n: Notice, ms = 3000) => {
+  // Permissions UX
+  const [rolePerms, setRolePerms] = useState<Record<string, Permission[]>>({});
+  const [rolePermsLoading, setRolePermsLoading] = useState<Record<string, boolean>>({});
+  const [rolePermsError, setRolePermsError] = useState<Record<string, string>>({});
+
+  const [permModalRole, setPermModalRole] = useState<Role | null>(null);
+  const [permModalQuery, setPermModalQuery] = useState("");
+  const [permModalCategory, setPermModalCategory] = useState<string>("all");
+  const [permModalSelected, setPermModalSelected] = useState<Set<string>>(new Set());
+  const [permModalBusy, setPermModalBusy] = useState(false);
+
+  const showNotice = (n: Notice, ms = 2800) => {
     setNotice(n);
     if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
     noticeTimerRef.current = window.setTimeout(() => setNotice(null), ms);
@@ -100,12 +117,7 @@ export default function RoleManagementPage() {
       setPerms(permList);
       setGroups(groupList);
 
-      // Keep only existing keys
-      setSelectedPermByRoleId((prev) => {
-        const next: Record<string, string> = {};
-        for (const role of roleList) if (prev[role.id]) next[role.id] = prev[role.id];
-        return next;
-      });
+      // Keep only existing role/group keys for selection state
       setSelectedGroupByRoleId((prev) => {
         const next: Record<string, string> = {};
         for (const role of roleList) if (prev[role.id]) next[role.id] = prev[role.id];
@@ -139,11 +151,12 @@ export default function RoleManagementPage() {
   // Lock body scroll when any modal open
   useEffect(() => {
     const prev = document.body.style.overflow;
-    if (createRoleOpen || createGroupOpen) document.body.style.overflow = "hidden";
+    const anyModalOpen = createRoleOpen || createGroupOpen || !!permModalRole;
+    if (anyModalOpen) document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = prev;
     };
-  }, [createRoleOpen, createGroupOpen]);
+  }, [createRoleOpen, createGroupOpen, permModalRole]);
 
   // Autofocus
   useEffect(() => {
@@ -171,6 +184,19 @@ export default function RoleManagementPage() {
     if (!q) return groups;
     return groups.filter((g) => g.name.toLowerCase().includes(q) || g.id.toLowerCase().includes(q));
   }, [groups, groupQuery]);
+
+  const permCategories = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const p of perms) {
+      const c = permCategory(p.key);
+      counts[c] = (counts[c] || 0) + 1;
+    }
+    const keys = Object.keys(counts).sort();
+    return [
+      { key: "all", label: "All", count: perms.length },
+      ...keys.map((k) => ({ key: k, label: k === "system" ? "system" : k, count: counts[k] })),
+    ];
+  }, [perms]);
 
   const createRole = async () => {
     const name = newRoleName.trim();
@@ -216,31 +242,6 @@ export default function RoleManagementPage() {
     }
   };
 
-  const grantPermission = async (role: Role, permId: string) => {
-    if (!permId) return;
-
-    setGrantBusyRoleId(role.id);
-    setErr(null);
-
-    try {
-      const perm = perms.find((p) => p.id === permId);
-      await api(`/admin/roles/${role.id}/permissions/${permId}`, { method: "POST" });
-
-      showNotice({
-        type: "success",
-        message: `Granted “${perm?.key ?? "permission"}” → “${role.name}” ✅`,
-      });
-
-      await loadAll({ silent: true });
-    } catch (e: any) {
-      const msg = e?.data?.message || e?.message || "Grant permission failed";
-      setErr(msg);
-      showNotice({ type: "error", message: msg });
-    } finally {
-      setGrantBusyRoleId(null);
-    }
-  };
-
   const attachRoleToGroup = async (group: Group, role: Role) => {
     const key = `${group.id}:${role.id}`;
     setAttachBusyKey(key);
@@ -258,6 +259,114 @@ export default function RoleManagementPage() {
       setAttachBusyKey(null);
     }
   };
+
+  // ---- Role permissions: load + bulk grant ----
+
+  const loadRolePermissions = async (roleId: string) => {
+    setRolePermsLoading((p) => ({ ...p, [roleId]: true }));
+    setRolePermsError((p) => ({ ...p, [roleId]: "" }));
+
+    try {
+      // Expecting one of: Permission[] | {items: Permission[]} | {permissions: Permission[]}
+      const res = await api<any>(`/admin/roles/${roleId}/permissions`);
+      const list = (unwrapArray(res) as Permission[]).slice().sort(byKey);
+      setRolePerms((prev) => ({ ...prev, [roleId]: list }));
+      return list;
+    } catch (e: any) {
+      const msg =
+        e?.data?.message ||
+        e?.message ||
+        "Could not load permissions for this role (missing endpoint?)";
+      setRolePermsError((p) => ({ ...p, [roleId]: msg }));
+      setRolePerms((prev) => ({ ...prev, [roleId]: [] }));
+      return [];
+    } finally {
+      setRolePermsLoading((p) => ({ ...p, [roleId]: false }));
+    }
+  };
+
+  const openPermModal = async (role: Role) => {
+    setPermModalRole(role);
+    setPermModalQuery("");
+    setPermModalCategory("all");
+    setPermModalSelected(new Set());
+    setPermModalBusy(false);
+
+    // Try to preload current perms (if endpoint exists)
+    const existing =
+      rolePerms[role.id] ??
+      (await loadRolePermissions(role.id).catch(() => []));
+
+    if (existing?.length) {
+      setPermModalSelected(new Set(existing.map((p) => p.id)));
+    }
+  };
+
+  const closePermModal = () => {
+    if (permModalBusy) return;
+    setPermModalRole(null);
+    setPermModalSelected(new Set());
+    setPermModalQuery("");
+    setPermModalCategory("all");
+  };
+
+  const permModalVisiblePerms = useMemo(() => {
+    const q = permModalQuery.trim().toLowerCase();
+    const cat = permModalCategory;
+
+    return perms.filter((p) => {
+      const inCat = cat === "all" ? true : permCategory(p.key) === cat;
+      if (!inCat) return false;
+      if (!q) return true;
+      return p.key.toLowerCase().includes(q) || p.id.toLowerCase().includes(q);
+    });
+  }, [perms, permModalQuery, permModalCategory]);
+
+  const togglePermSelected = (permId: string) => {
+    setPermModalSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(permId)) next.delete(permId);
+      else next.add(permId);
+      return next;
+    });
+  };
+
+const grantSelectedPerms = async () => {
+  const role = permModalRole;
+  if (!role) return;
+
+  const selectedIds = Array.from(permModalSelected);
+  if (selectedIds.length === 0) {
+    return showNotice({ type: "info", message: "Select at least one permission." });
+  }
+
+  setPermModalBusy(true);
+  setErr(null);
+
+  try {
+    // ✅ NEW: single bulk set
+    await api(`/admin/roles/${role.id}/permissions`, {
+      method: "PUT",
+      body: { permissionIds: selectedIds },
+    });
+
+    // ✅ Update local cache instantly (no extra round-trip needed)
+    const assigned = perms.filter((p) => permModalSelected.has(p.id)).slice().sort(byKey);
+    setRolePerms((prev) => ({ ...prev, [role.id]: assigned }));
+
+    showNotice({
+      type: "success",
+      message: `Permissions updated for “${role.name}” ✅`,
+    });
+  } catch (e: any) {
+    const msg = e?.data?.message || e?.message || "Update permissions failed";
+    setErr(msg);
+    showNotice({ type: "error", message: msg });
+  } finally {
+    setPermModalBusy(false);
+  }
+};
+
 
   const avatarPalette = ["rmAvatar--blue", "rmAvatar--violet", "rmAvatar--green", "rmAvatar--orange", "rmAvatar--pink"];
   const avatarIcon = ["♛", "⌂", "👤", "👁", "🎧"];
@@ -431,7 +540,7 @@ export default function RoleManagementPage() {
             <thead>
               <tr>
                 <th className="rmTh">Role</th>
-                <th className="rmTh">Grant Permission</th>
+                <th className="rmTh">Permissions</th>
                 <th className="rmTh">Attach To Group</th>
               </tr>
             </thead>
@@ -449,8 +558,11 @@ export default function RoleManagementPage() {
                   const idx = hashToIndex(r.id, avatarPalette.length);
                   const icon = avatarIcon[hashToIndex(r.id, avatarIcon.length)];
 
-                  const selectedPerm = selectedPermByRoleId[r.id] ?? "";
                   const selectedGroup = selectedGroupByRoleId[r.id] ?? "";
+
+                  const knownPerms = rolePerms[r.id];
+                  const permsLoading = !!rolePermsLoading[r.id];
+                  const permsErr = rolePermsError[r.id];
 
                   return (
                     <tr key={r.id} className="rmRow">
@@ -475,32 +587,49 @@ export default function RoleManagementPage() {
                       </td>
 
                       <td className="rmTd">
-                        <div className="rmGrant">
-                          <select
-                            className="rmSelect"
-                            value={selectedPerm}
-                            disabled={grantBusyRoleId === r.id}
-                            onChange={(e) =>
-                              setSelectedPermByRoleId((prev) => ({ ...prev, [r.id]: e.target.value }))
-                            }
-                          >
-                            <option value="" disabled>
-                              Select permission…
-                            </option>
-                            {filteredPerms.map((p) => (
-                              <option key={p.id} value={p.id}>
-                                {p.key}
-                              </option>
-                            ))}
-                          </select>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                            <button className="rmBtn rmBtn--primary" onClick={() => openPermModal(r)}>
+                              Manage permissions
+                            </button>
 
-                          <button
-                            className="rmBtn rmBtn--primary rmBtn--grant"
-                            disabled={!selectedPerm || grantBusyRoleId === r.id}
-                            onClick={() => grantPermission(r, selectedPerm)}
-                          >
-                            {grantBusyRoleId === r.id ? "Granting…" : "Grant"}
-                          </button>
+                            <button
+                              className="rmBtn rmBtn--ghost"
+                              onClick={() => loadRolePermissions(r.id)}
+                              disabled={permsLoading}
+                            >
+                              {permsLoading ? "Loading…" : "View permissions"}
+                            </button>
+
+                            {knownPerms ? (
+                              <span className="rmSub" style={{ marginLeft: 2 }}>
+                                Known: <strong>{knownPerms.length}</strong>
+                              </span>
+                            ) : (
+                              <span className="rmSub">Not loaded yet</span>
+                            )}
+                          </div>
+
+                          {permsErr ? (
+                            <div className="rmSub" style={{ opacity: 0.9 }}>
+                              {String(permsErr)}
+                            </div>
+                          ) : null}
+
+                          {knownPerms && knownPerms.length > 0 ? (
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                              {knownPerms.slice(0, 8).map((p) => (
+                                <span key={p.id} className="rmChip rmChip--gray" title={p.id}>
+                                  {p.key}
+                                </span>
+                              ))}
+                              {knownPerms.length > 8 ? (
+                                <span className="rmSub">+{knownPerms.length - 8} more…</span>
+                              ) : null}
+                            </div>
+                          ) : knownPerms && knownPerms.length === 0 ? (
+                            <div className="rmSub">No permissions assigned.</div>
+                          ) : null}
                         </div>
                       </td>
 
@@ -634,7 +763,7 @@ export default function RoleManagementPage() {
               <div>
                 <div className="rmKicker">Create</div>
                 <h3 className="rmModal__title">New role</h3>
-                <div className="rmModal__sub">Example: SUPPORT, FINANCE, AGENCY_ADMIN…</div>
+                <div className="rmModal__sub">Example: SUPPORT, FINANCE, CLAIMS_AGENT…</div>
               </div>
 
               <button className="rmIconClose" onClick={() => !busy && setCreateRoleOpen(false)} aria-label="Close modal">
@@ -672,7 +801,7 @@ export default function RoleManagementPage() {
               <div>
                 <div className="rmKicker">Create</div>
                 <h3 className="rmModal__title">New group</h3>
-                <div className="rmModal__sub">Example: Support Team, Finance Team, Agency Managers…</div>
+                <div className="rmModal__sub">Example: Claims Team, Finance Team, Support Team…</div>
               </div>
 
               <button className="rmIconClose" onClick={() => !busy && setCreateGroupOpen(false)} aria-label="Close modal">
@@ -697,6 +826,147 @@ export default function RoleManagementPage() {
               <button className="rmBtn rmBtn--primary" onClick={createGroup} disabled={busy}>
                 {busy ? "Creating…" : "Create group"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Permissions Modal (bulk) */}
+      {permModalRole && (
+        <div className="rmModalBackdrop" onMouseDown={closePermModal} role="dialog" aria-modal="true">
+          <div
+            className="rmModal"
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{ width: "min(980px, 95vw)" }}
+          >
+            <div className="rmModal__head">
+              <div>
+                <div className="rmKicker">Permissions</div>
+                <h3 className="rmModal__title">Manage permissions for “{permModalRole.name}”</h3>
+                <div className="rmModal__sub">
+                  Select multiple permissions, then click <strong>Grant selected</strong>.
+                </div>
+              </div>
+
+              <button className="rmIconClose" onClick={closePermModal} aria-label="Close modal">
+                ✕
+              </button>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "240px 1fr", gap: 12 }}>
+              {/* Left: categories */}
+              <div style={{ borderRight: "1px solid rgba(255,255,255,0.08)", paddingRight: 10 }}>
+                <div className="rmSub" style={{ marginBottom: 8, fontWeight: 700 }}>
+                  Categories
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 360, overflow: "auto" }}>
+                  {permCategories.map((c) => {
+                    const active = permModalCategory === c.key;
+                    return (
+                      <button
+                        key={c.key}
+                        className={`rmBtn ${active ? "rmBtn--primary" : "rmBtn--ghost"}`}
+                        style={{ justifyContent: "space-between" }}
+                        onClick={() => setPermModalCategory(c.key)}
+                        type="button"
+                      >
+                        <span style={{ textTransform: "capitalize" }}>{c.label}</span>
+                        <span className="rmBadge rmBadge--violet">{c.count}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Right: list */}
+              <div>
+                <div className="rmSearch" style={{ marginBottom: 10 }}>
+                  <span className="rmSearch__icon">🔍</span>
+                  <input
+                    className="rmInput"
+                    placeholder="Search permissions…"
+                    value={permModalQuery}
+                    onChange={(e) => setPermModalQuery(e.target.value)}
+                  />
+                  {permModalQuery ? (
+                    <button className="rmClear" onClick={() => setPermModalQuery("")} aria-label="Clear permission search">
+                      ✕
+                    </button>
+                  ) : null}
+                </div>
+
+                <div className="rmSub" style={{ marginBottom: 10 }}>
+                  Selected: <strong>{permModalSelected.size}</strong>
+                </div>
+
+                <div
+                  style={{
+                    maxHeight: 360,
+                    overflow: "auto",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    borderRadius: 12,
+                    padding: 10,
+                  }}
+                >
+                  {permModalVisiblePerms.length === 0 ? (
+                    <div className="rmSub">No permissions match.</div>
+                  ) : (
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {permModalVisiblePerms.map((p) => {
+                        const checked = permModalSelected.has(p.id);
+                        return (
+                          <label
+                            key={p.id}
+                            style={{
+                              display: "flex",
+                              gap: 10,
+                              alignItems: "flex-start",
+                              padding: 10,
+                              borderRadius: 12,
+                              border: "1px solid rgba(255,255,255,0.06)",
+                              background: checked ? "rgba(255,255,255,0.04)" : "transparent",
+                              cursor: "pointer",
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => togglePermSelected(p.id)}
+                              disabled={permModalBusy}
+                              style={{ marginTop: 4 }}
+                            />
+                            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                              <div style={{ fontWeight: 750 }}>{p.key}</div>
+                              <div className="rmSub" style={{ fontSize: 12 }}>
+                                {p.description ? p.description : <span className="rmRoleId">{p.id}</span>}
+                              </div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rmModal__actions" style={{ marginTop: 12 }}>
+                  <button className="rmBtn rmBtn--ghost" onClick={closePermModal} disabled={permModalBusy}>
+                    Close
+                  </button>
+
+                  <button
+                    className="rmBtn rmBtn--primary"
+                    onClick={grantSelectedPerms}
+                    disabled={permModalBusy || permModalSelected.size === 0}
+                  >
+                    {permModalBusy ? "Granting…" : "Grant selected"}
+                  </button>
+                </div>
+
+                <div className="rmSub" style={{ marginTop: 8 }}>
+                  Tip: grant <strong>*</strong> only for “super admin” roles.
+                </div>
+              </div>
             </div>
           </div>
         </div>

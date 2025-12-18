@@ -26,40 +26,20 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="auth">
-      <div className="auth__left">
-        <div className="brand brand--light">
-          <div className="brand__logo">🛡️</div>
-          <div>
-            <div className="brand__name">InsureTech</div>
-            <div className="brand__sub">Enterprise Portal</div>
+    <div className="auth auth--center">
+      {/* Decorative animated sides (no logic impact) */}
+      <div className="authFx authFx--l" aria-hidden="true" />
+      <div className="authFx authFx--r" aria-hidden="true" />
+
+      <div className="authCenter">
+        <img className="authLogo" src="/logo.jpeg" alt="Logo" />
+
+        <form className="card authCard" onSubmit={onSubmit}>
+          <div className="authHead">
+            <div className="authBrand">InsureTech</div>
+            <div className="authSub">Enterprise Portal</div>
           </div>
-        </div>
 
-        <h1 className="auth__title">Secure Access to Your Insurance Platform</h1>
-        <p className="auth__subtitle">
-          Manage policies, claims, and customer relationships with enterprise-grade security.
-        </p>
-
-        <div className="feature">
-          <div className="feature__icon">🔒</div>
-          <div>
-            <div className="feature__title">Bank-Level Security</div>
-            <div className="feature__desc">Session cookies + CSRF protection + strict RBAC.</div>
-          </div>
-        </div>
-
-        <div className="feature">
-          <div className="feature__icon">⚡</div>
-          <div>
-            <div className="feature__title">Fast & Scalable</div>
-            <div className="feature__desc">Neon Postgres + Redis sessions ready for load.</div>
-          </div>
-        </div>
-      </div>
-
-      <div className="auth__right">
-        <form className="card" onSubmit={onSubmit}>
           <h2>Welcome Back</h2>
           <p className="muted">Sign in to your account</p>
 
@@ -84,7 +64,7 @@ export default function LoginPage() {
 
           {err ? <div className="error">{err}</div> : null}
 
-          <button className="btn btn--primary" disabled={loading}>
+          <button className="btn btn--primary" disabled={loading} aria-busy={loading}>
             {loading ? "Signing in..." : "Sign In →"}
           </button>
 

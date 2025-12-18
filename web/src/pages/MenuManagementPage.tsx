@@ -254,7 +254,8 @@ setRoleGroups(unwrapArray(rg));
     setBusy(true);
     setErr(null);
     try {
-      await api(`/menu-admin/roles/${attachRoleId}/menu-groups/${selectedGroupId}`, { method: "POST" });
+await api(`/menu-admin/roles/${attachRoleId}/menu-groups/${selectedGroupId}`, { method: "POST" });
+ await loadAll()
       setAttachRoleId("");
       showNotice({ type: "success", message: "Menu group attached to role ✅" });
     } catch (e: any) {

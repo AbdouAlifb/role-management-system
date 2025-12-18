@@ -31,52 +31,108 @@ export class MenuAdminService {
       throw new ConflictException("MenuGroup code already exists for this tenant");
     }
   }
+  
+async createMenuFunction(tenantId: string, dto: CreateMenuFunctionDto) {
+  try {
+    const fn = await this.prisma.menuFunction.create({
+      data: {
+        tenantId,
+        code: dto.code,
+        name: dto.name,
+        type: dto.type, // ✅ REQUIRED by Prisma schema
+        path: dto.path ?? null,
+        requiredPermissionKey: dto.requiredPermissionKey ?? null,
+      },
+    });
 
-  async createMenuFunction(tenantId: string, dto: CreateMenuFunctionDto) {
-    try {
-      return await this.prisma.menuFunction.create({
-        data: {
-          tenantId,
-          code: dto.code,
-          name: dto.name,
-          type: dto.type,
-          path: dto.path ?? null,
-          requiredPermissionKey: dto.requiredPermissionKey ?? null,
-        },
+    if (fn.requiredPermissionKey) {
+      await this.ensurePermissionKeysExist(
+        tenantId,
+        [fn.requiredPermissionKey],
+        "Auto (menu function)"
+      );
+    }
+
+    return fn;
+  } catch {
+    throw new ConflictException("Menu function code already exists");
+  }
+}
+
+
+
+async attachFunctionToGroup(
+  tenantId: string,
+  groupId: string,
+  functionId: string,
+  sequence?: number,
+) {
+  const mg = await this.prisma.menuGroup.findFirst({ where: { id: groupId, tenantId } });
+  if (!mg) throw new NotFoundException("Menu group not found");
+
+  const fn = await this.prisma.menuFunction.findFirst({ where: { id: functionId, tenantId } });
+  if (!fn) throw new NotFoundException("Menu function not found");
+
+  const link = await this.prisma.menuGroupFunction.upsert({
+    where: { menuGroupId_menuFunctionId: { menuGroupId: groupId, menuFunctionId: functionId } },
+    update: { sequence: sequence ?? null }, // ✅ store/update sequence
+    create: { menuGroupId: groupId, menuFunctionId: functionId, sequence: sequence ?? null }, // ✅ store
+  });
+
+  // ✅ if the group is already linked to roles, auto-grant this function permission to them
+  if (fn.requiredPermissionKey) {
+    await this.ensurePermissionKeysExist(tenantId, [fn.requiredPermissionKey], "Auto (menu function attach)");
+
+    const roleLinks = await this.prisma.roleMenuGroup.findMany({
+      where: { menuGroupId: groupId, role: { tenantId } },
+      select: { roleId: true },
+    });
+
+    if (roleLinks.length) {
+      const perm = await this.prisma.permission.findUnique({
+        where: { tenantId_key: { tenantId, key: fn.requiredPermissionKey } },
+        select: { id: true },
       });
-    } catch (e: any) {
-      throw new ConflictException("MenuFunction code already exists for this tenant");
+
+      if (perm) {
+        await this.prisma.rolePermission.createMany({
+          data: roleLinks.map(r => ({ roleId: r.roleId, permissionId: perm.id })),
+          skipDuplicates: true,
+        });
+        await this.bumpRbacVersion(tenantId);
+      }
     }
   }
 
-  async attachFunctionToGroup(tenantId: string, groupId: string, functionId: string, sequence?: number) {
-    // ensure tenant match
-    const group = await this.prisma.menuGroup.findFirst({ where: { id: groupId, tenantId } });
-    if (!group) throw new NotFoundException("MenuGroup not found");
+  return link;
+}
 
-    const fn = await this.prisma.menuFunction.findFirst({ where: { id: functionId, tenantId } });
-    if (!fn) throw new NotFoundException("MenuFunction not found");
 
-    return this.prisma.menuGroupFunction.upsert({
-      where: { menuGroupId_menuFunctionId: { menuGroupId: groupId, menuFunctionId: functionId } },
-      update: { sequence: sequence ?? null },
-      create: { menuGroupId: groupId, menuFunctionId: functionId, sequence: sequence ?? null },
-    });
-  }
 
-  async attachMenuGroupToRole(tenantId: string, roleId: string, menuGroupId: string) {
-    const role = await this.prisma.role.findFirst({ where: { id: roleId, tenantId } });
-    if (!role) throw new NotFoundException("Role not found");
+async attachMenuGroupToRole(tenantId: string, roleId: string, menuGroupId: string) {
+  const role = await this.prisma.role.findFirst({ where: { id: roleId, tenantId } });
+  if (!role) throw new NotFoundException("Role not found");
 
-    const group = await this.prisma.menuGroup.findFirst({ where: { id: menuGroupId, tenantId } });
-    if (!group) throw new NotFoundException("MenuGroup not found");
+  const mg = await this.prisma.menuGroup.findFirst({ where: { id: menuGroupId, tenantId } });
+  if (!mg) throw new NotFoundException("Menu group not found");
 
-    return this.prisma.roleMenuGroup.upsert({
-      where: { roleId_menuGroupId: { roleId, menuGroupId } },
-      update: {},
-      create: { roleId, menuGroupId },
-    });
-  }
+  const link = await this.prisma.roleMenuGroup.upsert({
+    where: { roleId_menuGroupId: { roleId, menuGroupId } },
+    update: {},
+    create: { roleId, menuGroupId },
+  });
+
+  const groupFns = await this.prisma.menuGroupFunction.findMany({
+    where: { menuGroupId },
+    include: { menuFunction: true },
+  });
+
+  const keys = this.uniqKeys(groupFns.map(x => x.menuFunction.requiredPermissionKey));
+  const autoGranted = await this.grantPermissionKeysToRole(tenantId, roleId, keys);
+
+  return { link, autoGranted };
+}
+
 
   async listMenuGroups(tenantId: string) {
     return this.prisma.menuGroup.findMany({
@@ -143,6 +199,48 @@ async getUserAccessSummary(tenantId: string, userId: string) {
 
     return { user, groups, roles, permissions, menu };
   }
+
+  private async bumpRbacVersion(tenantId: string) {
+  await this.prisma.tenant.update({
+    where: { id: tenantId },
+    data: { rbacVersion: { increment: 1 } },
+  });
+}
+
+private uniqKeys(keys: Array<string | null | undefined>) {
+  return Array.from(new Set(keys.map(k => (k ?? "").trim()).filter(Boolean)));
+}
+
+private async ensurePermissionKeysExist(tenantId: string, keys: string[], prefix = "Auto (menu)") {
+  const uniq = this.uniqKeys(keys);
+  for (const key of uniq) {
+    await this.prisma.permission.upsert({
+      where: { tenantId_key: { tenantId, key } },
+      update: {},
+      create: { tenantId, key, description: `${prefix}: ${key}` },
+    });
+  }
+  return uniq;
+}
+
+private async grantPermissionKeysToRole(tenantId: string, roleId: string, keys: string[]) {
+  const uniq = await this.ensurePermissionKeysExist(tenantId, keys, "Auto (menu attach)");
+  if (uniq.length === 0) return { granted: 0, keys: [] as string[] };
+
+  const perms = await this.prisma.permission.findMany({
+    where: { tenantId, key: { in: uniq } },
+    select: { id: true, key: true },
+  });
+
+  await this.prisma.rolePermission.createMany({
+    data: perms.map(p => ({ roleId, permissionId: p.id })),
+    skipDuplicates: true,
+  });
+
+  await this.bumpRbacVersion(tenantId);
+
+  return { granted: perms.length, keys: perms.map(p => p.key) };
+}
 
 }
 

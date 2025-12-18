@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Put, Req,Delete , UseGuards } from "@nestjs/common";
 import { AdminService } from "./admin.service";
 import { RequirePermissions } from "../rbac/decorators/require-permissions.decorator";
 import { SessionAuthGuard } from "../rbac/guards/session-auth.guard";
@@ -10,6 +10,7 @@ import { CreateGroupDto } from "./dto/create-group.dto";
 import { CreateRoleDto } from "./dto/create-role.dto";
 import { CreatePermissionDto } from "./dto/create-permission.dto";
 import { SetUserGroupsDto } from "./dto/set-user-groups.dto";
+import { SetRolePermissionsDto } from "./dto/set-role-permissions.dto";
 
 @Controller("admin")
 @UseGuards(SessionAuthGuard, PermissionsGuard)
@@ -57,41 +58,106 @@ export class AdminController {
   @Post("groups")
   async createGroup(@Req() req: any, @Body() dto: CreateGroupDto) {
     const g = await this.admin.createGroup(this.tenantId(req), dto);
-    await this.audit.log({ tenantId: this.tenantId(req), actorUserId: this.actor(req), action: "GROUP_CREATE", resource: "Group", resourceId: g.id, req });
+    await this.audit.log({
+      tenantId: this.tenantId(req),
+      actorUserId: this.actor(req),
+      action: "GROUP_CREATE",
+      resource: "Group",
+      resourceId: g.id,
+      req,
+    });
     return g;
   }
 
   @Post("roles")
   async createRole(@Req() req: any, @Body() dto: CreateRoleDto) {
     const r = await this.admin.createRole(this.tenantId(req), dto);
-    await this.audit.log({ tenantId: this.tenantId(req), actorUserId: this.actor(req), action: "ROLE_CREATE", resource: "Role", resourceId: r.id, req });
+    await this.audit.log({
+      tenantId: this.tenantId(req),
+      actorUserId: this.actor(req),
+      action: "ROLE_CREATE",
+      resource: "Role",
+      resourceId: r.id,
+      req,
+    });
     return r;
   }
 
   @Post("permissions")
   async createPermission(@Req() req: any, @Body() dto: CreatePermissionDto) {
     const p = await this.admin.createPermission(this.tenantId(req), dto);
-    await this.audit.log({ tenantId: this.tenantId(req), actorUserId: this.actor(req), action: "PERMISSION_CREATE", resource: "Permission", resourceId: p.id, req });
+    await this.audit.log({
+      tenantId: this.tenantId(req),
+      actorUserId: this.actor(req),
+      action: "PERMISSION_CREATE",
+      resource: "Permission",
+      resourceId: p.id,
+      req,
+    });
     return p;
   }
 
   @Post("groups/:groupId/roles/:roleId")
   async attachRoleToGroup(@Req() req: any, @Param("groupId") groupId: string, @Param("roleId") roleId: string) {
     const gr = await this.admin.attachRoleToGroup(this.tenantId(req), groupId, roleId);
-    await this.audit.log({ tenantId: this.tenantId(req), actorUserId: this.actor(req), action: "GROUP_ROLE_ATTACH", resource: "Group", resourceId: groupId, req, meta: { roleId } });
+    await this.audit.log({
+      tenantId: this.tenantId(req),
+      actorUserId: this.actor(req),
+      action: "GROUP_ROLE_ATTACH",
+      resource: "Group",
+      resourceId: groupId,
+      req,
+      meta: { roleId },
+    });
     return gr;
   }
 
   @Post("roles/:roleId/permissions/:permId")
   async attachPermissionToRole(@Req() req: any, @Param("roleId") roleId: string, @Param("permId") permId: string) {
     const rp = await this.admin.attachPermissionToRole(this.tenantId(req), roleId, permId);
-    await this.audit.log({ tenantId: this.tenantId(req), actorUserId: this.actor(req), action: "ROLE_PERMISSION_ATTACH", resource: "Role", resourceId: roleId, req, meta: { permId } });
+    await this.audit.log({
+      tenantId: this.tenantId(req),
+      actorUserId: this.actor(req),
+      action: "ROLE_PERMISSION_ATTACH",
+      resource: "Role",
+      resourceId: roleId,
+      req,
+      meta: { permId },
+    });
     return rp;
   }
 
   // Lists (useful for frontend)
-  @Get("users") async users(@Req() req: any) { return this.admin.listUsers(this.tenantId(req)); }
-  @Get("groups") async groups(@Req() req: any) { return this.admin.listGroups(this.tenantId(req)); }
-  @Get("roles") async roles(@Req() req: any) { return this.admin.listRoles(this.tenantId(req)); }
-  @Get("permissions") async perms(@Req() req: any) { return this.admin.listPermissions(this.tenantId(req)); }
+  @Get("users")
+  users(@Req() req: any) {
+    return this.admin.listUsers(this.tenantId(req));
+  }
+
+  @Get("groups")
+  groups(@Req() req: any) {
+    return this.admin.listGroups(this.tenantId(req));
+  }
+
+  @Get("roles")
+  roles(@Req() req: any) {
+    return this.admin.listRoles(this.tenantId(req));
+  }
+
+  @Get("permissions")
+  perms(@Req() req: any) {
+    return this.admin.listPermissions(this.tenantId(req));
+  }
+
+  // optional: list perms for one role
+  @Get("roles/:roleId/permissions")
+  listRolePerms(@Req() req: any, @Param("roleId") roleId: string) {
+    return this.admin.listRolePermissions(this.tenantId(req), roleId);
+  }
+
+  // main endpoint used by the UI (multi-select)
+  @Put("roles/:roleId/permissions")
+  setRolePerms(@Req() req: any, @Param("roleId") roleId: string, @Body() dto: SetRolePermissionsDto) {
+    return this.admin.setRolePermissions(this.tenantId(req), roleId, dto.permissionIds ?? []);
+  }
+
 }

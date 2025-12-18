@@ -1718,3 +1718,226 @@ body {
 .sidebar[data-collapsed="true"] .navmeta{
   display:none;
 }
+/* =============================
+   LOGIN (centered, white)
+   scoped override: .auth--center
+============================= */
+.auth.auth--center {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: 1fr;
+  place-items: center;
+  padding: 56px 18px;
+  background: #fff;
+}
+
+.auth.auth--center .authCenter {
+  width: min(480px, 92vw);
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+}
+
+.auth.auth--center .authLogo {
+  width: 94px;
+  height: 94px;
+  object-fit: contain;
+}
+
+.auth.auth--center .authCard {
+  width: 100%;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  box-shadow: 0 18px 60px rgba(15, 23, 42, 0.10);
+  backdrop-filter: none;
+}
+
+.auth.auth--center .authHead {
+  display: grid;
+  gap: 2px;
+  text-align: center;
+  margin-bottom: 4px;
+}
+
+.auth.auth--center .authBrand {
+  font-weight: 950;
+  letter-spacing: -0.02em;
+}
+
+.auth.auth--center .authSub {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.55);
+}
+
+@media (max-width: 420px) {
+  .auth.auth--center { padding: 44px 14px; }
+  .auth.auth--center .authLogo { width: 84px; height: 84px; }
+}
+/* =============================
+   LOGIN (centered + animated sides)
+   scoped: .auth.auth--center
+============================= */
+.auth.auth--center{
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: 1fr;
+  place-items: center;
+  padding: 56px 18px;
+  background: #fff;
+  position: relative;
+  overflow: hidden;
+  isolation: isolate; /* keeps FX behind content cleanly */
+}
+
+/* Center stack */
+.auth.auth--center .authCenter{
+  width: min(480px, 92vw);
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  position: relative;
+  z-index: 2;
+}
+
+.auth.auth--center .authLogo{
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+  filter: drop-shadow(0 10px 20px rgba(2,6,23,.10));
+  animation: authPop .55s ease both;
+}
+
+.auth.auth--center .authCard{
+  width: 100%;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  box-shadow: 0 18px 60px rgba(15, 23, 42, 0.10);
+  backdrop-filter: none;
+  animation: authUp .6s ease .05s both;
+}
+
+.auth.auth--center .authHead{
+  display: grid;
+  gap: 2px;
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.auth.auth--center .authBrand{
+  font-weight: 950;
+  letter-spacing: -0.02em;
+}
+
+.auth.auth--center .authSub{
+  font-size: 12px;
+  color: rgba(15,23,42,.55);
+}
+
+/* ===== Artistic side animations ===== */
+.authFx{
+  position: absolute;
+  inset: -40px auto -40px auto;
+  width: min(520px, 42vw);
+  pointer-events: none;
+  z-index: 1;
+  opacity: .95;
+}
+
+.authFx--l{ left: -160px; }
+.authFx--r{ right: -160px; transform: scaleX(-1); }
+
+/* aurora blobs */
+.authFx::before,
+.authFx::after{
+  content:"";
+  position:absolute;
+  inset: 0;
+  border-radius: 999px;
+  filter: blur(22px);
+  transform: translate3d(0,0,0);
+  will-change: transform;
+}
+
+.authFx::before{
+  background:
+    radial-gradient(closest-side at 30% 40%, rgba(36,72,216,.18), transparent 70%),
+    radial-gradient(closest-side at 65% 55%, rgba(21,42,122,.14), transparent 72%),
+    radial-gradient(closest-side at 55% 25%, rgba(59,130,246,.10), transparent 70%);
+  animation: fxFloat1 10s ease-in-out infinite;
+}
+
+.authFx::after{
+  inset: 90px 40px 120px 40px;
+  background:
+    radial-gradient(closest-side at 35% 55%, rgba(36,72,216,.14), transparent 72%),
+    radial-gradient(closest-side at 70% 40%, rgba(21,42,122,.10), transparent 74%);
+  animation: fxFloat2 12s ease-in-out infinite;
+  opacity: .85;
+}
+
+/* faint “security grid” shimmer */
+.auth.auth--center::before{
+  content:"";
+  position:absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events:none;
+  opacity: .55;
+  background:
+    radial-gradient(900px 520px at 20% 30%, rgba(36,72,216,.06), transparent 60%),
+    radial-gradient(900px 520px at 80% 20%, rgba(21,42,122,.05), transparent 60%),
+    repeating-linear-gradient(
+      90deg,
+      rgba(15,23,42,.04) 0px,
+      rgba(15,23,42,.04) 1px,
+      transparent 1px,
+      transparent 60px
+    ),
+    repeating-linear-gradient(
+      0deg,
+      rgba(15,23,42,.03) 0px,
+      rgba(15,23,42,.03) 1px,
+      transparent 1px,
+      transparent 60px
+    );
+  mask-image: radial-gradient(closest-side at 50% 40%, #000 35%, transparent 75%);
+  animation: gridDrift 18s linear infinite;
+}
+
+/* Motion polish */
+@keyframes authUp{
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes authPop{
+  from { opacity: 0; transform: scale(.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes fxFloat1{
+  0%   { transform: translate3d(0, 0, 0) rotate(0deg); }
+  50%  { transform: translate3d(18px, 22px, 0) rotate(10deg); }
+  100% { transform: translate3d(0, 0, 0) rotate(0deg); }
+}
+@keyframes fxFloat2{
+  0%   { transform: translate3d(0, 0, 0) rotate(0deg); }
+  50%  { transform: translate3d(-16px, 18px, 0) rotate(-8deg); }
+  100% { transform: translate3d(0, 0, 0) rotate(0deg); }
+}
+@keyframes gridDrift{
+  from { background-position: 0 0, 0 0, 0 0, 0 0; }
+  to   { background-position: 0 0, 0 0, 240px 0, 0 240px; }
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce){
+  .authFx::before, .authFx::after, .auth.auth--center::before, .authLogo, .authCard{
+    animation: none !important;
+  }
+}
+
+/* Mobile: keep it clean */
+@media (max-width: 520px){
+  .authFx{ opacity: .65; }
+  .auth.auth--center{ padding: 44px 14px; }
+  .auth.auth--center .authLogo{ width: 86px; height: 86px; }
+}
